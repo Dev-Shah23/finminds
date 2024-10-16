@@ -13,7 +13,7 @@ import logging
 
 app = Flask(__name__)
 
-# Create a static directory for saving images
+# Create a static directory for saving images if it doesn't exist
 if not os.path.exists('static'):
     os.makedirs('static')
 
@@ -100,7 +100,7 @@ def create_plot(data):
                 top=max(historical_df['Close'].max(), intraday_df['Close'].max()) + 5)
     plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.2)
 
-    # Define the path to save the image
+    # Define the path to save the image in the static directory
     image_filename = f'static/{symbol}_stock_chart.png'
     plt.savefig(image_filename, dpi=100, bbox_inches='tight')  # Save the image
     
@@ -108,10 +108,6 @@ def create_plot(data):
     
     # Return the URL to the image
     return f'/static/{symbol}_stock_chart.png'
-
-@app.route('/')
-def index():
-    return "Welcome to the Stock Chart API! Use /fetch-stock-chart?symbol=<symbol> to get stock data."
 
 @app.route('/fetch-stock-chart', methods=['GET'])
 def fetch_stock_chart():
