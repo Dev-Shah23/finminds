@@ -1,7 +1,7 @@
 import os
 import tempfile
 import base64
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -9,29 +9,48 @@ import matplotlib
 matplotlib.use('Agg')  # Set the backend for matplotlib
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import logging
 
 app = Flask(__name__)
+
+# Configure Flask to serve static files from 'static' directory
+app.config['STATIC_FOLDER'] = 'static'
+
+# Create a static directory for saving images
+if not os.path.exists('static'):
+    os.makedirs('static')
+
+# Suppress debug-level logs
+logging.basicConfig(level=logging.INFO)
+
+# Suppress matplotlib and other noisy libraries
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 # Function to identify peaks in the data using NumPy
 def find_peaks(data):
     return np.where((data[1:-1] > data[:-2]) & (data[1:-1] > data[2:]))[0] + 1
 
-# Function to fetch stock data for charting
+# Function to fetch intraday stock data for the past week
 def fetch_intraday_data(symbol):
-    ticker = yf.Ticker(symbol)
+    ticker = yf.TTicker(symbol)
+
+    # Get today's date
     today = datetime.today().strftime('%Y-%m-%d')
     one_week_ago = (datetime.today() - timedelta(days=7)).strftime('%Y-%m-%d')
 
     # Fetch historical data for the past week
     historical_data_df = ticker.history(start=one_week_ago, end=today, interval='1d')
     historical_close = historical_data_df['Close'].to_numpy()
+
+    # Find peaks in historical closing prices
     peaks = find_peaks(historical_close)
 
-    # Fetch intraday data for today
+    # Fetch live intraday data for today
     intraday_data_df = ticker.history(period="1d", interval="1m")
     if intraday_data_df.empty:
         return None
 
+    # Calculate the current price and price change
     current_price = intraday_data_df['Close'].iloc[-1]
     previous_close = historical_close[-1]
     price_change = current_price - previous_close
@@ -49,7 +68,6 @@ def fetch_intraday_data(symbol):
         "percentage_change": percentage_change
     }
 
-# Function to create and save stock chart as a base64 image
 def create_plot(data):
     symbol = data['symbol']
     intraday_data = data['intraday_data']
@@ -71,57 +89,60 @@ def create_plot(data):
 
     ax.set_title(f'{symbol} Stock Price (Intraday + Historical)', color='white')
     ax.set_xlabel('Date/Time', color='white')
-    ax.set_ylabel('Price', color='white')
+    ax.set_ylabel('Price (INR)', color='white')
     ax.grid(color='dimgray', linestyle=':', linewidth=0.5, alpha=0.7)
     ax.set_facecolor('black')
     ax.tick_params(colors='white')
+    ax.xaxis.label.set_color('white')
+    ax.yaxis.label.set_color('white')
+    plt.xticks(color='white')
+    plt.yticks(color='white')
 
+    ax.set_xlim(left=historical_df['Date'].iloc[0], right=intraday_df['Datetime'].iloc[-1])
+    ax.set_ylim(bottom=min(historical_df['Close'].min(), intraday_df['Close'].min()) - 5, 
+                top=max(historical_df['Close'].max(), intraday_df['Close'].max()) + 5)
     plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.2)
 
-    # Save the plot to a temporary file
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-        image_path = temp_file.name
-        plt.savefig(image_path)
-
-    plt.close()
-
-    # Convert the image to base64
-    with open(image_path, "rb") as image_file:
-        encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+    # Define the path to save the image
+    image_filename = f'static/{symbol}_stock_chart.png'
+    plt.savefig(image_filename, dpi=100, bbox_inches='tight')  # Save the image
     
-    os.remove(image_path)
+    plt.close()
+    
+    # Return the URL to the image
+    return f'/static/{symbol}_stock_chart.png'
 
-    return encoded_image
-
-# Route to serve the stock chart and stock data
-@app.route('/')
-def home():
-    return "Welcome to the Stock Chart API. Use /fetch-stock-chart?symbol=STOCK_SYMBOL to fetch data."
-
+@app.route('/fetch-stock-chart', methods=['GET'])
 def fetch_stock_chart():
     symbol = request.args.get('symbol')
 
     if not symbol:
         return jsonify({"error": "Invalid input. Expecting 'symbol' query parameter."}), 400
 
-    stock_data = fetch_intraday_data(symbol)
+    try:
+        stock_data = fetch_intraday_data(symbol)
 
-    if stock_data is None:
-        return jsonify({"error": f"No data found for symbol: {symbol}. Check if it may be delisted."}), 404
+        if stock_data is None:
+            return jsonify({"error": f"No data found for symbol: {symbol}. Check if it may be delisted."}), 404
 
-    # Generate the plot and get the base64 image
-    image_base64 = create_plot(stock_data)
+        # Create the plot and save it to a static directory
+        image_url = create_plot(stock_data)
 
-    # Prepare JSON response
-    response_data = {
-        "symbol": stock_data['symbol'],
-        "current_price": stock_data['current_price'],
-        "price_change": stock_data['price_change'],
-        "percentage_change": stock_data['percentage_change'],
-        "image": image_base64  # Base64 encoded image
-    }
+        # Prepare JSON response
+        response_data = {
+            "symbol": stock_data['symbol'],
+            "current_price": stock_data['current_price'],
+            "price_change": stock_data['price_change'],
+            "percentage_change": stock_data['percentage_change'],
+            "image_url": image_url  # URL to the image
+        }
 
-    return jsonify(response_data)
+        return jsonify(response_data)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0')
+    # Use the environment variable 'PORT' for Render
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
