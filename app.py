@@ -13,9 +13,6 @@ import logging
 
 app = Flask(__name__)
 
-# Configure Flask to serve static files from 'static' directory
-app.config['STATIC_FOLDER'] = 'static'
-
 # Create a static directory for saving images
 if not os.path.exists('static'):
     os.makedirs('static')
@@ -32,7 +29,7 @@ def find_peaks(data):
 
 # Function to fetch intraday stock data for the past week
 def fetch_intraday_data(symbol):
-    ticker = yf.TTicker(symbol)
+    ticker = yf.Ticker(symbol)
 
     # Get today's date
     today = datetime.today().strftime('%Y-%m-%d')
@@ -112,6 +109,10 @@ def create_plot(data):
     # Return the URL to the image
     return f'/static/{symbol}_stock_chart.png'
 
+@app.route('/')
+def index():
+    return "Welcome to the Stock Chart API! Use /fetch-stock-chart?symbol=<symbol> to get stock data."
+
 @app.route('/fetch-stock-chart', methods=['GET'])
 def fetch_stock_chart():
     symbol = request.args.get('symbol')
@@ -143,6 +144,4 @@ def fetch_stock_chart():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    # Use the environment variable 'PORT' for Render
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000)  # Set host and port for production
