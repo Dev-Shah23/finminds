@@ -109,7 +109,7 @@ def create_plot(data):
     # Return the URL to the image
     return f'/static/{symbol}_stock_chart.png'
 
-@app.route('/fetch-stock-chart', methods=['GET'])
+@app.route('/', methods=['GET'])
 def fetch_stock_chart():
     symbol = request.args.get('symbol')
 
